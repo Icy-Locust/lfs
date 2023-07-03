@@ -1,0 +1,68 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=binutils
+VERSION=2.40
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM-$VERSION
+tar xvf $SOURCES/$PKGNAM-$VERSION.tar.xz
+cd $PKGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Build the package
+mkdir build
+cd build
+CFLAGS="$MYCFLAGS" \
+	../configure --prefix=/usr \
+	--sysconfdir=/etc   \
+	--enable-gold       \
+	--enable-ld=default \
+	--enable-plugins    \
+	--enable-shared     \
+	--disable-werror    \
+	--enable-64-bit-bfd \
+	--with-system-zlib
+
+
+make $MYMAKEFLAGS tooldir=/usr
+
+# Install the package
+make $MYMAKEFLAGS install DESTDIR=$PKG tooldir=/usr
+rm -fv $PKG/usr/lib/lib{bfd,ctf,ctf-nobfd,sframe,opcodes}.a
+rm -fv $PKG/usr/share/man/man1/{gprofng,gp-*}.1
+
+# Include documentation files
+
+# Add doinst.sh to package (if it exists)
+if [ -e $CWD/doinst.sh.gz ]; then
+	zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+fi
+
+# Strip some libraries and binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages if they exist
+find $PKG/usr/share/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/share/man -type l ); do
+	ln -s $( readlink $i ).gz $i.gz
+	rm $i
+done
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz}

@@ -1,0 +1,114 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=glibc
+VERSION=2.37
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM-$VERSION
+tar xvf $SOURCES/$PKGNAM-$VERSION.tar.xz
+cd $PKGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+patch -Np1 -i $SOURCES/glibc-2.37-fhs-1.patch
+sed '/width -=/s/workend - string/number_length/' \
+	    -i stdio-common/vfprintf-process-arg.c
+
+# Build the package
+mkdir -v build
+cd       build
+echo "rootsbindir=/usr/sbin" > configparms
+CFLAGS="$MYCFLAGS" \
+	../configure --prefix=/usr               \
+	--disable-werror                         \
+	--enable-kernel=4.14                     \
+	--enable-stack-protector=strong          \
+	--with-headers=/usr/include              \
+	libc_cv_slibdir=/usr/lib
+make $MYMAKEFLAGS
+
+# Test the results
+make check $MYMAKEFLAGS || true
+# Install the package
+sed '/test-installation/s@$(PERL)@echo not running@' -i ../Makefile
+make install DESTDIR=$PKG
+
+mkdir -pv $PKG/etc
+cp -v ../nscd/nscd.conf $PKG/etc/nscd.conf
+mkdir -pv $PKG/var/cache/nscd
+
+cat > $PKG/etc/nsswitch.conf << "EOF"
+# Begin /etc/nsswitch.conf
+
+passwd: files
+group: files
+shadow: files
+
+hosts: files dns
+networks: files
+
+protocols: files
+services: files
+ethers: files
+rpc: files
+
+# End /etc/nsswitch.conf
+EOF
+
+
+cat > $PKG/etc/ld.so.conf << "EOF"
+# Begin /etc/ld.so.conf
+/usr/local/lib
+/opt/lib
+
+EOF
+
+# Include documentation files
+install -dm755 $PKG/usr/share/doc/$PKGNAM-$VERSION
+install -m644 $CWD/$PKGNAM.SlackBuild $PKG/usr/share/doc/$PKGNAM-$VERSION/
+
+# Add doinst.sh to package (if it exists)
+if [ -e $CWD/doinst.sh.gz ]; then
+	zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+fi
+
+# Strip some libraries and binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages if they exist
+if [ -d $PKG/usr/man ]; then
+	( cd $PKG/usr/man
+	find . -type f -exec gzip -9 {} \;
+	for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+	) 
+fi
+
+# Compress info pages if they exist (and remove the dir file)
+if [ -d $PKG/usr/info ]; then
+	gzip -9 $PKG/usr/info/*.info
+	rm -f $PKG/usr/info/dir
+fi
+
+# Compress info pages if they exist (and remove the dir file)
+if [ -d $PKG/usr/info ]; then
+	gzip -9 $PKG/usr/info/*.info
+	rm -f $PKG/usr/info/dir
+fi
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz}

@@ -1,0 +1,76 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=tcl
+VERSION=8.6.13
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM$VERSION
+tar xvf $SOURCES/$PKGNAM$VERSION-src.tar.gz
+cd $PKGNAM$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Build the package
+SRCDIR=$(pwd)
+cd unix
+CFLAGS="$MYCFLAGS" \
+./configure --prefix=/usr           \
+	--mandir=/usr/share/man
+make $MYMAKEFLAGS
+
+sed -e "s|$SRCDIR/unix|/usr/lib|" \
+    -e "s|$SRCDIR|/usr/include|"  \
+    -i tclConfig.sh
+
+sed -e "s|$SRCDIR/unix/pkgs/tdbc1.1.5|/usr/lib/tdbc1.1.5|" \
+    -e "s|$SRCDIR/pkgs/tdbc1.1.5/generic|/usr/include|"    \
+    -e "s|$SRCDIR/pkgs/tdbc1.1.5/library|/usr/lib/tcl8.6|" \
+    -e "s|$SRCDIR/pkgs/tdbc1.1.5|/usr/include|"            \
+    -i pkgs/tdbc1.1.5/tdbcConfig.sh
+
+sed -e "s|$SRCDIR/unix/pkgs/itcl4.2.3|/usr/lib/itcl4.2.3|" \
+    -e "s|$SRCDIR/pkgs/itcl4.2.3/generic|/usr/include|"    \
+    -e "s|$SRCDIR/pkgs/itcl4.2.3|/usr/include|"            \
+    -i pkgs/itcl4.2.3/itclConfig.sh
+
+# Install the package
+make $MYMAKEFLAGS install DESTDIR=$PKG
+chmod -v u+w $PKG/usr/lib/libtcl8.6.so
+make $MYMAKEFLAGS install-private-headers
+ln -sfv tclsh8.6 $PKG/usr/bin/tclsh
+mv $PKG/usr/share/man/man3/{Thread,Tcl_Thread}.3
+
+# Include documentation files
+
+# Add doinst.sh to package (if it exists)
+if [ -e $CWD/doinst.sh.gz ]; then
+	zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+fi
+
+# Strip some libraries and binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages if they exist
+find $PKG/usr/share/man -type f -exec gzip -9 {} \;
+for i in $( find $PKG/usr/share/man -type l ); do
+	ln -s $( readlink $i ).gz $i.gz
+	rm $i
+done
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz}

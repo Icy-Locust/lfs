@@ -1,0 +1,58 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=gmp
+VERSION=6.2.1
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM-$VERSION
+tar xvf $SOURCES/$PKGNAM-$VERSION.tar.xz
+cd $PKGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+cp -v configfsf.guess config.guess
+cp -v configfsf.sub   config.sub
+# Build the package
+CFLAGS="$MYCFLAGS" \
+	./configure --prefix=/usr \
+	--enable-cxx     \
+	--disable-static \
+	--docdir=/usr/share/doc/gmp-6.2.1
+
+make $MYMAKEFLAGS
+make $MYMAKEFLAGS html
+
+# Install the package
+make $MYMAKEFLAGS install DESTDIR=$PKG
+make $MYMAKEFLAGS install-html DESTDIR=$PKG
+
+# Include documentation files
+install -dm755 $PKG/usr/share/doc/$PKGNAM-$VERSION
+
+# Add doinst.sh to package (if it exists)
+if [ -e $CWD/doinst.sh.gz ]; then
+	zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+fi
+
+# Strip some libraries and binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages if they exist
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz}

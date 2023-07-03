@@ -1,0 +1,81 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=gcc
+VERSION=13.1.0
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp/pkgbuild}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM-$VERSION
+tar xvf $SOURCES/$PKGNAM-$VERSION.tar.xz
+cd $PKGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+sed -e '/m64=/s/lib64/lib/' \
+	-i.orig gcc/config/i386/t-linux64
+# Build the package
+mkdir build
+cd build
+CFLAGS="$MYCFLAGS" \
+	../configure --prefix=/usr \
+	LD=ld                    \
+	--enable-languages=c,c++ \
+	--enable-default-pie     \
+	--enable-default-ssp     \
+	--disable-multilib       \
+	--disable-bootstrap      \
+	--disable-fixincludes    \
+	--with-system-zlib
+make $MYMAKEFLAGS
+
+# Install the package
+make $MYMAKEFLAGS install DESTDIR=$PKG
+ln -svr $PKG/usr/bin/cpp $PKG/usr/lib
+ln -sv gcc.1 $PKG/usr/share/man/man1/cc.1
+mkdir -p $PKG/usr/lib/bfd-plugins/
+ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/13.1.0/liblto_plugin.so \
+        $PKG/usr/lib/bfd-plugins/
+mkdir -p $PKG/usr/share/gdb/auto-load/usr/lib
+mv $PKG/usr/lib/*gdb.py $PKG/usr/share/gdb/auto-load/usr/lib
+
+# Include documentation files
+
+# Add doinst.sh to package (if it exists)
+if [ -e $CWD/doinst.sh.gz ]; then
+	zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+fi
+
+# Strip some libraries and binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages if they exist
+if [ -d $PKG/usr/share/man ]; then
+	( cd $PKG/usr/share/man
+	find . -type f -exec gzip -9 {} \;
+	for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+	) 
+fi
+
+# Compress info pages if they exist
+if [ -d $PKG/usr/share/info ]; then
+	gzip -9 $PKG/usr/share/info/*.info
+	rm -f $PKG/usr/share/info/dir
+fi
+
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz}

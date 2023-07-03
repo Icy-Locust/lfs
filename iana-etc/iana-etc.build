@@ -1,0 +1,61 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=iana-etc
+VERSION=20230524
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM-$VERSION
+tar xvf $SOURCES/$PKGNAM-$VERSION.tar.gz
+cd $PKGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Build the package
+
+# Install the package
+mkdir $PKG/etc
+cp services protocols $PKG/etc
+
+# Include documentation files
+
+# Add doinst.sh to package (if it exists)
+
+# Strip some libraries and binaries
+
+# Compress man pages if they exist
+if [ -d $PKG/usr/man ]; then
+	( cd $PKG/usr/man
+	find . -type f -exec gzip -9 {} \;
+	for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+	) 
+fi
+
+# Compress info pages if they exist (and remove the dir file)
+if [ -d $PKG/usr/info ]; then
+	gzip -9 $PKG/usr/info/*.info
+	rm -f $PKG/usr/info/dir
+fi
+
+# Compress info pages if they exist (and remove the dir file)
+if [ -d $PKG/usr/info ]; then
+	gzip -9 $PKG/usr/info/*.info
+	rm -f $PKG/usr/info/dir
+fi
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz} || exit 1

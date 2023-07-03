@@ -1,0 +1,62 @@
+#!/bin/bash -e
+# revision date 2023/06/30
+
+PKGNAM=meson
+VERSION=1.1.1
+BUILD=1
+
+CWD=$( pwd )
+TMP=${TMP:-/tmp/pkgbuild}
+PKG=$TMP/package-$PKGNAM
+
+ARCH=$( uname -m )
+SOURCES=${SOURCES:-/sources}
+
+MYCFLAGS="-O2"
+MYMAKEFLAGS=${MAKEFLAGS:-"-j$( expr $( nproc ) + 1 )"}
+
+rm -rf $PKG
+mkdir -p $TMP $PKG
+cd $TMP
+rm -rf $PKGNAM-$VERSION
+tar xvf $SOURCES/$PKGNAM-$VERSION.tar.gz
+cd $PKGNAM-$VERSION
+chown -R root:root .
+chmod -R u+w,go+r-w,a-s .
+
+# Build the package
+python3 setup.py install --root=$PKG
+
+# Install the package
+install -vDm644 data/shell-completions/bash/meson /usr/share/bash-completion/completions/meson
+install -vDm644 data/shell-completions/zsh/_meson /usr/share/zsh/site-functions/_meson
+
+# Include documentation files
+install -dm755 $PKG/usr/share/doc/$PKGNAM-$VERSION
+
+# Add doinst.sh to package (if it exists)
+if [ -e $CWD/doinst.sh.gz ]; then
+	zcat $CWD/doinst.sh.gz > $PKG/install/doinst.sh
+fi
+
+# Strip some libraries and binaries
+find $PKG -print0 | xargs -0 file | grep -e "executable" -e "shared object" | grep ELF | cut -f 1 -d : | xargs strip --strip-unneeded 2> /dev/null || true
+
+# Compress man pages if they exist
+if [ -d $PKG/usr/share/man ]; then
+	( cd $PKG/usr/share/man
+	find . -type f -exec gzip -9 {} \;
+	for i in $(find . -type l) ; do ln -s $(readlink $i).gz $i.gz ; rm $i ; done
+	) 
+fi
+
+# Compress info pages if they exist
+if [ -d $PKG/usr/share/info ]; then
+	gzip -9 $PKG/usr/share/info/*.info
+	rm -f $PKG/usr/share/info/dir
+fi
+
+
+# Build the package
+cd $PKG
+/sbin/makepkg -l y -c n $TMP/$PKGNAM-$VERSION.${PKGTYPE:-txz}
